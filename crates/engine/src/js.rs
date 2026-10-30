@@ -184,12 +184,22 @@ impl JsRunner {
     }
 }
 
-/// The Info dictionary as `this.info` keys (lower-case).
+/// Standard Info entries use the scripting names (lower-case); application-specific entries
+/// keep their spelling so a form can read its own version and configuration metadata.
 fn info(cos: &pdfcraft_cos::Document) -> Vec<(String, String)> {
     let Some(d) = cos.trailer().get(b"Info").map(|i| cos.resolve(i)).and_then(|i| i.as_dict().cloned()) else { return Vec::new() };
     d.iter()
         .filter_map(|(k, v)| match &*cos.resolve(v) {
-            pdfcraft_cos::Object::String(s) => Some((String::from_utf8_lossy(k).to_lowercase(), s.to_text())),
+            pdfcraft_cos::Object::String(s) => {
+                let key = String::from_utf8_lossy(k);
+                let key = match k.as_slice() {
+                    b"Title" | b"Author" | b"Subject" | b"Keywords" | b"Creator" | b"Producer" | b"CreationDate" | b"ModDate" | b"Trapped" => {
+                        key.to_lowercase()
+                    }
+                    _ => key.into_owned(),
+                };
+                Some((key, s.to_text()))
+            }
             _ => None,
         })
         .collect()
@@ -468,6 +478,27 @@ impl Session {
 #[cfg(test)]
 mod review_tests {
     use super::*;
+
+    #[test]
+    fn script_info_keeps_custom_metadata_names() {
+        use pdfcraft_cos::{Dict, Object, PdfString};
+        let mut cos = pdfcraft_cos::Document::new_empty();
+        let mut metadata = Dict::new();
+        metadata.set(b"Title".to_vec(), Object::String(PdfString::literal(b"Character sheet".to_vec())));
+        metadata.set(b"RulesVersion".to_vec(), Object::String(PdfString::literal(b"13.2.3".to_vec())));
+        cos.trailer_mut().set(b"Info".to_vec(), Object::Dict(metadata));
+        let doc = pdfcraft_js::DocInfo { info: info(&cos), ..Default::default() };
+        let o = pdfcraft_js::run(
+            "event.value = info.title + ':' + info.RulesVersion;",
+            &pdfcraft_js::Event::doc("Console"),
+            &doc,
+            &[],
+            &[],
+            Limits::default(),
+        );
+        assert_eq!(o.error, None);
+        assert_eq!(o.value, "Character sheet:13.2.3");
+    }
 
     /// A long run of underscores (a form's blank) is read in one pass: each glyph is compared with
     /// the word so far without reading the word again.

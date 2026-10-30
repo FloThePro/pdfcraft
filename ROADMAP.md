@@ -1,5 +1,7 @@
 # PdfCraft roadmap
 
+> **Last reviewed:** 2026-10-30 · **Last updated:** 2026-10-30 · **Change:** minor (M6 character-sheet scripting foundations; full MPMB compatibility remains unqualified; estimates unchanged)
+
 > **Last reviewed:** 2026-10-15 · **Last updated:** 2026-10-15 · **Change:** minor (typed small Edit font sizes and Fill & Sign text/date colour, #2444/#2496; estimates unchanged)
 
 **Stage: alpha** · next: beta, ~25% (ready for real work 50% → 75%) and ~400–700 h away
@@ -204,6 +206,7 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-30 (M6, character-sheet compatibility):** Document rule libraries can use up to 1 MiB per script within an 8 MiB combined budget; field-script limits stay unchanged. Repeated field lookups and `event.target` share script-defined helpers within a run, and custom document metadata retains its spelling. Full MPMB character-sheet support remains incomplete; see `docs/mpmb-compatibility.md`. Estimates unchanged.
 - **2026-10-29 (M7, #2517):** Widening a paragraph rejoins a wrap with the number of spaces that wrap consumed, including a typed run and none for a Chinese or Japanese word split. The count survives an incremental save and a full rewrite, and a width-only `text_edit` uses it. Estimates unchanged.
 - **2026-10-26 (M11, JBIG2 symbols):** Lossless JBIG2 now stores each distinct mark of a black-and-white image once, as a symbol, and places its exact copies, when that is smaller than the generic region: on six pages of rendered 300 dpi text 28% of the generic region's size and 17% of Group 4's, and the same bits back through two independent decoders (hayro-jbig2 and Poppler). Scans, whose letters are seldom identical, gain little until refinement coding; a dictionary shared between pages (`/JBIG2Globals`) is next. Estimates unchanged.
 - **2026-10-27 (M10, OCR models):** Model staging downloads and verifies the ONNX pair after the upstream RTEN URL brownout; runtime discovery prefers complete ONNX pairs per directory, retains complete RTEN fallback and preserves directory precedence.
@@ -695,6 +698,8 @@ Newest first: the date, what moved, and the new overall estimate.
 - **2026-10-10 (UI docking):** Tools and Inspector can be regrouped, split beside the PDF, or floated inside the app window. Existing toggles reopen panels at their saved locations; UI commands arrange/reset panels, and preferences retain their layout. Read/full-screen modes preserve the focused document view. No milestone percentage change.
 
 ## Revision history
+
+**2026-10-30 · minor:** M6 character-sheet scripting foundations: bounded larger document libraries, stable field wrappers within a run, and case-preserved custom metadata. Full MPMB compatibility remains unqualified. Estimates unchanged.
 
 **2026-10-25 · minor:** M14 localization current state: Arabic catalogs stay logical, Arabic/Kurdish labels take an explicit RTL direction, and stock chrome mirrors; native/browser RTL input, IME and complex workflows remain unqualified. Native Simplified Chinese uses LXGW WenKai Lite; the web build has no Hans face. Estimates unchanged.
 
