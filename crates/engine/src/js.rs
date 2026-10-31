@@ -1,6 +1,7 @@
 //! Acrobat JavaScript in documents: field scripts run during form edits ([`JsRunner`], wired
 //! into `forms` through its [`pdfcraft_forms::Scripts`] hook), and button actions and console
-//! input run on request ([`Session::run_javascript`]). What scripts ask of the viewer (alerts,
+//! input run on request ([`Session::run_javascript`]). Ordinary AcroForm document libraries
+//! also run on opening ([`on_open`]). What scripts ask of the viewer (alerts,
 //! printing, navigation, links) is kept for the front end in [`JsOutput`].
 //!
 //! Preferences ▸ JavaScript ▸ Enable Acrobat JavaScript is [`Session::set_javascript`]; with it
@@ -252,6 +253,46 @@ impl Scripts for JsRunner {
 /// A document-level JavaScript: its name and source.
 pub fn document_scripts(cos: &pdfcraft_cos::Document) -> Vec<(String, String)> {
     pdfcraft_forms::document_scripts_named(cos)
+}
+
+/// Initialize ordinary AcroForms on opening, before the renderer and field snapshot are built.
+/// Keep effects produced before a script error, as field scripts do, and report that error.
+/// Native recalculation applies the changes without initializing the libraries a second time.
+pub(crate) fn on_open(cos: &mut pdfcraft_cos::Document, file_name: &str, output: &mut JsOutput) -> Result<(), EditError> {
+    let runner = JsRunner::new(cos, file_name);
+    if runner.doc_scripts.is_empty() {
+        return Ok(());
+    }
+    let fields = pdfcraft_forms::fields(cos);
+    let states: Vec<_> = fields.iter().map(|f| field_state(cos, f)).collect();
+    let mut outcome = pdfcraft_js::run("", &pdfcraft_js::Event::doc("Open"), &runner.doc, &states, &runner.doc_scripts, Limits::default());
+    let changes = changes(&states, &outcome.changed);
+    let resets: Vec<_> = outcome
+        .requests
+        .iter()
+        .filter_map(|r| match r {
+            Request::Reset(names) => Some(names.clone()),
+            _ => None,
+        })
+        .collect();
+    outcome.requests.retain(|r| !matches!(r, Request::Reset(_)));
+    output.absorb(&outcome);
+    if !changes.is_empty() {
+        if let Some(p) = cos.permissions() {
+            crate::edit::check_permission(&Edit::ApplyScriptChanges { changes: changes.clone() }, &p)?;
+        }
+        pdfcraft_forms::apply_script_changes(cos, &changes, &mut pdfcraft_forms::NoScripts)?;
+    }
+    for names in resets {
+        let names = (!names.is_empty()).then(|| {
+            fields.iter().filter(|f| names.iter().any(|n| f.name == *n || f.name.starts_with(&format!("{n}.")))).map(|f| f.name.clone()).collect()
+        });
+        if let Some(p) = cos.permissions() {
+            crate::edit::check_permission(&Edit::ResetForm { names: names.clone() }, &p)?;
+        }
+        pdfcraft_forms::reset(cos, names.as_deref())?;
+    }
+    Ok(())
 }
 
 impl crate::Document {
