@@ -184,15 +184,38 @@ impl JsRunner {
     }
 }
 
-/// The Info dictionary as `this.info` keys (lower-case).
+/// Standard Info entries use the scripting names (lower-case); application-specific entries
+/// keep their spelling and a nonconflicting lower-case alias for backwards compatibility.
 fn info(cos: &pdfcraft_cos::Document) -> Vec<(String, String)> {
     let Some(d) = cos.trailer().get(b"Info").map(|i| cos.resolve(i)).and_then(|i| i.as_dict().cloned()) else { return Vec::new() };
-    d.iter()
+    let mut entries: Vec<_> = d
+        .iter()
         .filter_map(|(k, v)| match &*cos.resolve(v) {
-            pdfcraft_cos::Object::String(s) => Some((String::from_utf8_lossy(k).to_lowercase(), s.to_text())),
+            pdfcraft_cos::Object::String(s) => {
+                let key = String::from_utf8_lossy(k);
+                let key = match k.as_slice() {
+                    b"Title" | b"Author" | b"Subject" | b"Keywords" | b"Creator" | b"Producer" | b"CreationDate" | b"ModDate" | b"Trapped" => {
+                        key.to_lowercase()
+                    }
+                    _ => key.into_owned(),
+                };
+                Some((key, s.to_text()))
+            }
             _ => None,
         })
-        .collect()
+        .collect();
+    // Resolve exact names first, including standard entries mapped to their scripting names.
+    // A raw exact key also reserves its name when its value is not a string we expose.
+    let mut names: std::collections::HashSet<_> = entries.iter().map(|(key, _)| key.clone()).collect();
+    let aliases: Vec<_> = entries
+        .iter()
+        .filter_map(|(key, value)| {
+            let alias = key.to_lowercase();
+            (!d.contains(alias.as_bytes()) && names.insert(alias.clone())).then(|| (alias, value.clone()))
+        })
+        .collect();
+    entries.extend(aliases);
+    entries
 }
 
 impl Scripts for JsRunner {
@@ -468,6 +491,52 @@ impl Session {
 #[cfg(test)]
 mod review_tests {
     use super::*;
+
+    #[test]
+    fn script_info_keeps_custom_metadata_names() {
+        use pdfcraft_cos::{Dict, Object, PdfString};
+        let mut cos = pdfcraft_cos::Document::new_empty();
+        let mut metadata = Dict::new();
+        metadata.set(b"Title".to_vec(), Object::String(PdfString::literal(b"Character sheet".to_vec())));
+        metadata.set(b"RulesVersion".to_vec(), Object::String(PdfString::literal(b"13.2.3".to_vec())));
+        cos.trailer_mut().set(b"Info".to_vec(), Object::Dict(metadata));
+        let doc = pdfcraft_js::DocInfo { info: info(&cos), ..Default::default() };
+        let o = pdfcraft_js::run(
+            "event.value = info.title + ':' + info.RulesVersion + ':' + info.rulesversion;",
+            &pdfcraft_js::Event::doc("Console"),
+            &doc,
+            &[],
+            &[],
+            Limits::default(),
+        );
+        assert_eq!(o.error, None);
+        assert_eq!(o.value, "Character sheet:13.2.3:13.2.3");
+    }
+
+    #[test]
+    fn script_info_aliases_do_not_replace_exact_or_standard_keys() {
+        use pdfcraft_cos::{Dict, Object, PdfString};
+        let mut cos = pdfcraft_cos::Document::new_empty();
+        let mut metadata = Dict::new();
+        for (key, value) in [("RulesVersion", "new"), ("rulesversion", "legacy"), ("Title", "standard"), ("TITLE", "custom")] {
+            metadata.set(key.as_bytes().to_vec(), Object::String(PdfString::literal(value.as_bytes().to_vec())));
+        }
+        // Even an exact key whose value is not exposed must not receive another key's alias.
+        metadata.set(b"Count".to_vec(), Object::String(PdfString::literal(b"text".to_vec())));
+        metadata.set(b"count".to_vec(), Object::Int(7));
+        cos.trailer_mut().set(b"Info".to_vec(), Object::Dict(metadata));
+        let doc = pdfcraft_js::DocInfo { info: info(&cos), ..Default::default() };
+        let o = pdfcraft_js::run(
+            "event.value = [info.RulesVersion, info.rulesversion, info.title, info.TITLE, info.Count, typeof info.count].join(':');",
+            &pdfcraft_js::Event::doc("Console"),
+            &doc,
+            &[],
+            &[],
+            Limits::default(),
+        );
+        assert_eq!(o.error, None);
+        assert_eq!(o.value, "new:legacy:standard:custom:text:undefined");
+    }
 
     /// A long run of underscores (a form's blank) is read in one pass: each glyph is compared with
     /// the word so far without reading the word again.
